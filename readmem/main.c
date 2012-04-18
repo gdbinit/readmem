@@ -12,6 +12,7 @@
  * v0.1 - Initial version
  * v0.2 - Fix the columns output and display memory protection flags
  * v0.3 - Add support to dump the binary image of a mach-o app or library
+ *      - Fix unnecessary arm cases
  *
  * Check http://246tnt.com/iPhone/ for iOS Entitlements reference
  *
@@ -36,7 +37,6 @@
 #include <mach/vm_map.h>
 #include <mach-o/loader.h>
 
-#define DEBUG 1
 #define VERSION "0.3"
 
 #define MAX_SIZE 50000000
@@ -45,24 +45,9 @@
 static void header(void);
 static void usage(void);
 static void get_protection(vm_prot_t protection, char *prot);
-
-#if defined (__arm__)
-static void readmem(vm_offset_t *buffer, vm_address_t address, vm_size_t size, pid_t pid, vm_region_basic_info_data_64_t *info);
-#else
 static void readmem(mach_vm_offset_t *buffer, mach_vm_address_t address, mach_vm_size_t size, pid_t pid, vm_region_basic_info_data_64_t *info);
-#endif
-
-#if defined (__arm__)
-static vm_address_t get_image_size(vm_address_t address, pid_t pid);
-#else
 static mach_vm_address_t get_image_size(mach_vm_address_t address, pid_t pid);
-#endif
-
-#if defined (__arm__)
-static void dump_binary(vm_address_t address, pid_t pid, void *buffer);
-#else
 static void dump_binary(mach_vm_address_t address, pid_t pid, void *buffer);
-#endif
 
 // for iOS
 #if defined (__arm__)
@@ -76,15 +61,19 @@ extern kern_return_t mach_vm_region
  mach_msg_type_number_t *infoCnt,
  mach_port_t *object_name
  );
+
+extern kern_return_t mach_vm_read_overwrite
+(
+ vm_map_t target_task,
+ mach_vm_address_t address,
+ mach_vm_size_t size,
+ mach_vm_address_t data,
+ mach_vm_size_t *outsize
+ );
 #endif
 
-#if defined (__arm__)
-static void 
-readmem(vm_offset_t *buffer, vm_address_t address, vm_size_t size, pid_t pid, vm_region_basic_info_data_64_t *info)
-#else
 static void 
 readmem(mach_vm_offset_t *buffer, mach_vm_address_t address, mach_vm_size_t size, pid_t pid, vm_region_basic_info_data_64_t *info)
-#endif
 {
     // get task for pid
     vm_map_t port;
@@ -109,13 +98,9 @@ readmem(mach_vm_offset_t *buffer, mach_vm_address_t address, mach_vm_size_t size
     }
 
     // read memory - vm_read_overwrite because we supply the buffer
-#if defined (__arm__)
-    vm_size_t nread;
-    kr = vm_read_overwrite(port, address, (vm_size_t)size, (vm_address_t)buffer, &nread); 
-#else
     mach_vm_size_t nread;
     kr = mach_vm_read_overwrite(port, address, size, (mach_vm_address_t)buffer, &nread);
-#endif
+
     if (kr || nread != size)
     {
         fprintf(stderr, "[ERROR] vm_read failed!\n");
@@ -130,11 +115,7 @@ readmem(mach_vm_offset_t *buffer, mach_vm_address_t address, mach_vm_size_t size
  * if we dump using vmaddresses, we will get the alignment space into the dumped
  * binary and get into problems :-)
  */
-#if defined (__arm__)
-static vm_address_t get_image_size(vm_address_t address, pid_t pid)
-#else
 static mach_vm_address_t get_image_size(mach_vm_address_t address, pid_t pid)
-#endif
 {
 #if DEBUG
     printf("[DEBUG] Executing %s\n", __FUNCTION__);
@@ -150,11 +131,7 @@ static mach_vm_address_t get_image_size(mach_vm_address_t address, pid_t pid)
         exit(1);
     }
     
-#if defined (__arm__)
-    vm_address_t imagefilesize      = 0;
-#else
     mach_vm_address_t imagefilesize = 0;
-#endif
     
     // read the header info to find the LINKEDIT
     uint8_t *loadcmds = malloc(header.sizeofcmds*sizeof(uint8_t));
@@ -200,11 +177,7 @@ static mach_vm_address_t get_image_size(mach_vm_address_t address, pid_t pid)
  * dump the binary into the allocated buffer
  * we dump each segment and advance the buffer
  */
-#if defined (__arm__)
-static void dump_binary(vm_address_t address, pid_t pid, void *buffer)
-#else
 static void dump_binary(mach_vm_address_t address, pid_t pid, void *buffer)
-#endif
 {
 #if DEBUG
     printf("[DEBUG] Executing %s\n", __FUNCTION__);
@@ -220,11 +193,7 @@ static void dump_binary(mach_vm_address_t address, pid_t pid, void *buffer)
         exit(1);
     }
     
-#if defined (__arm__)
-    vm_address_t imagefilesize      = 0;
-#else
     mach_vm_address_t imagefilesize = 0;
-#endif
     
     // read the header info to find the LINKEDIT
     uint8_t *loadcmds = malloc(header.sizeofcmds*sizeof(uint8_t));
@@ -285,6 +254,7 @@ usage(void)
 	fprintf(stderr,"readmem -p pid -a address -s size [-o filename] [-f]\n");
 	fprintf(stderr,"Available Options : \n");
 	fprintf(stderr,"       -o filename	file to write binary output to\n");
+    fprintf(stderr,"       -f           make a full dump of target binary\n");
 	exit(1);
 }
 
@@ -357,23 +327,27 @@ main(int argc, char ** argv)
 	}
 	
 	header();
-
-	if (argc < 8)
+    
+	if (argc < 7)
 	{
 		usage();
 	}
     
-    if (size > MAX_SIZE)
+    if (size > MAX_SIZE || (size == 0 && fulldump == 0))
     {
-        printf("[ERROR] Invalid size (higher than maximum!)\n");
+        printf("[ERROR] Invalid size (higher than maximum or zero!)\n");
         exit(1);
     }
     
-    uint8_t *readbuffer = malloc(size*sizeof(uint8_t));
-	if (readbuffer == NULL)
+    uint8_t *readbuffer = NULL;
+    if (fulldump == 0)
     {
-        printf("[ERROR] Memory allocation failed!\n");
-        exit(1);
+        readbuffer = malloc(size*sizeof(uint8_t));
+        if (readbuffer == NULL)
+        {
+            printf("[ERROR] Memory allocation failed!\n");
+            exit(1);
+        }
     }
     
 	FILE *outputfile;	
@@ -397,85 +371,81 @@ main(int argc, char ** argv)
     // if it's a full image dump, we need to read its header and find the LINKEDIT segment
     if (fulldump)
     {
-#if defined (__arm__)
-        vm_address_t imagesize = 0;
-#else
+        // first we need to find the file size because memory alignment slack spaces
         mach_vm_address_t imagesize = 0;
-#endif
         imagesize = get_image_size(address, pid);
-        readbuffer = realloc(readbuffer, (imagesize * sizeof(uint8_t)));
+        // reallocate the buffer since size argument is not used
+        readbuffer = malloc((long)imagesize * sizeof(uint8_t));
+        // and finally read the sections and dump their contents to the buffer
         dump_binary(address, pid, (void*)readbuffer);
+        // dump buffer contents to file
+        if (outputname != NULL)
+        {
+            if (fwrite(readbuffer, (long)imagesize, 1, outputfile) < 1)
+            {
+                fprintf(stderr,"[ERROR] Write error at %s occurred!\n", outputname);
+                exit(1);
+            }
+            printf("\n[OK] Full binary dumped to %s!\n\n", outputname);
+        }
+    }
+    // we just want to read bits'n'pieces!
+    else
+    {
+        readmem((mach_vm_offset_t*)readbuffer, address, size, pid, &region_info);
         // dump to file
         if (outputname != NULL)
         {
-            if (fwrite(readbuffer, imagesize, 1, outputfile) < 1)
+            if (fwrite(readbuffer, size, 1, outputfile) < 1)
             {
                 fprintf(stderr,"[ERROR] Write error at %s occurred!\n", outputname);
                 exit(1);
             }
             printf("\n[OK] Memory dumped to %s!\n\n", outputname);
         }
-    }
-    else
-    {
-#if defined (__arm__)
-        readmem((vm_offset_t*)readbuffer, address, size, pid, &region_info);
-#else
-        readmem((mach_vm_offset_t*)readbuffer, address, size, pid, &region_info);
-#endif
-	}
-    // dump to file
-	if (outputname != NULL)
-	{
-//		if (fwrite(readbuffer, size, 1, outputfile) < 1)
-//		{
-//			fprintf(stderr,"[ERROR] Write error at %s occurred!\n", outputname);
-//			exit(1);
-//		}
-//		printf("\n[OK] Memory dumped to %s!\n\n", outputname);
-	}
-    // dump to stdout
-	else
-	{
-		int i = 0;
-        int x = 0;
-        int z = 0;
-        int linelength = 0;
-		
-        // retrieve memory protection for the region of the starting address
-        // CAVEAT: it will be incorrect if dumping size includes more than one region
-        //         but we can't get protection per page
-        char current_protection[4]; 
-        char maximum_protection[4];
-        get_protection(region_info.protection, current_protection);
-        get_protection(region_info.max_protection, maximum_protection);
-        printf("Memory protection: %s/%s\n\n", current_protection, maximum_protection);
-		// 16 columns
-		while (i < size)
-		{
-            linelength = (size - i) <= 16 ? (size - i) : 16;
-			printf("%p ",(void*)address);
-			z = i;
-            // hex dump
-			for (x = 0; x < linelength; x++)
-			{
-				printf("%02x ", readbuffer[z++]);
-			}
-            // make it always 16 columns, this could be prettier :P
-            for (x = linelength; x < 16; x++)
-                printf("   ");
-			z = i;
-            // try to print ascii
-			for (x = 0; x < linelength; x++)
-			{
-				printf("%c", isascii(readbuffer[z]) && isprint(readbuffer[z]) ? readbuffer[z] : '.');
-				z++;
-			}
-			i += 16;
-			printf("\n");
-			address += 16;
-		}
-		printf("\n");		
+        // dump to stdout
+        else
+        {
+            int i = 0;
+            int x = 0;
+            int z = 0;
+            int linelength = 0;
+            
+            // retrieve memory protection for the region of the starting address
+            // CAVEAT: it will be incorrect if dumping size includes more than one region
+            //         but we can't get protection per page
+            char current_protection[4]; 
+            char maximum_protection[4];
+            get_protection(region_info.protection, current_protection);
+            get_protection(region_info.max_protection, maximum_protection);
+            printf("Memory protection: %s/%s\n\n", current_protection, maximum_protection);
+            // 16 columns
+            while (i < size)
+            {
+                linelength = (size - i) <= 16 ? (size - i) : 16;
+                printf("%p ",(void*)address);
+                z = i;
+                // hex dump
+                for (x = 0; x < linelength; x++)
+                {
+                    printf("%02x ", readbuffer[z++]);
+                }
+                // make it always 16 columns, this could be prettier :P
+                for (x = linelength; x < 16; x++)
+                    printf("   ");
+                z = i;
+                // try to print ascii
+                for (x = 0; x < linelength; x++)
+                {
+                    printf("%c", isascii(readbuffer[z]) && isprint(readbuffer[z]) ? readbuffer[z] : '.');
+                    z++;
+                }
+                i += 16;
+                printf("\n");
+                address += 16;
+            }
+            printf("\n");	
+        }
 	}
     free(readbuffer);
 	return 0;

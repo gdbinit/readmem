@@ -1,7 +1,15 @@
-This is a small and simple userland util to dump processes memory on the screen
-or to a binary file.
+This is a small and simple userland util to dump processes memory on the screen or to a binary file.
 Useful to dump stuff or verify something without gdb or running under gdb.
- 
+
+A new option as been added as of version 0.3 that will dump the mach-o app or lib that is located
+at the given address. This makes process dumping easier (dumped binaries will not work because objective-c
+related stuff!), especially in iOS where there is no vmmap utility by default.
+With this, you can dump the main binary or any of its loaded libraries. You need to find the start address,
+which usually can be done using "info shared" command inside gdb. 
+To use this feature, pass the -f option to the util (no need to specify the size in this case).
+Usage:
+readmem -p XXX -a ADDRESS -o WHATEVERNAMEYOUWANT -f
+
 It is compatible with Mac OS X and iOS. If you want to compile to iOS you need to modify the project target
 and add the below information to Xcode configurations. 
 They will allow to build command-line executables for iOS.
