@@ -13,6 +13,10 @@
  * v0.2 - Fix the columns output and display memory protection flags
  * v0.3 - Add support to dump the binary image of a mach-o app or library
  *      - Fix unnecessary arm cases
+ * v0.4 - Support for ASLR (oops!!!) and fixes to the 64bits (mega ooops!)
+ *        Since we have the base address to dump from, we just compute the slide
+ *        against the info at the header. Easier than using dyld functions for this.
+ *        iOS still has problems dumping libs because of the giant/common __LINKEDIT section!
  *
  * Check http://246tnt.com/iPhone/ for iOS Entitlements reference
  *
@@ -37,9 +41,9 @@
 #include <mach/vm_map.h>
 #include <mach-o/loader.h>
 
-#define VERSION "0.3"
+#define VERSION "0.4"
 
-#define MAX_SIZE 50000000
+#define MAX_SIZE 100000000
 
 // prototypes
 static void header(void);
@@ -72,6 +76,8 @@ extern kern_return_t mach_vm_read_overwrite
  );
 #endif
 
+mach_vm_address_t vmaddr_slide = 0;
+
 static void 
 readmem(mach_vm_offset_t *buffer, mach_vm_address_t address, mach_vm_size_t size, pid_t pid, vm_region_basic_info_data_64_t *info)
 {
@@ -79,7 +85,9 @@ readmem(mach_vm_offset_t *buffer, mach_vm_address_t address, mach_vm_size_t size
     vm_map_t port;
 
     kern_return_t kr;
-
+//#if DEBUG
+//    printf("[DEBUG] Readmem of address %llx to buffer %llx with size %llx\n", address, buffer, size);
+//#endif
     if (task_for_pid(mach_task_self(), pid, &port))
     {
         fprintf(stderr, "[ERROR] Can't execute task_for_pid! Do you have the right permissions/entitlements?\n");
@@ -99,11 +107,12 @@ readmem(mach_vm_offset_t *buffer, mach_vm_address_t address, mach_vm_size_t size
 
     // read memory - vm_read_overwrite because we supply the buffer
     mach_vm_size_t nread;
+
     kr = mach_vm_read_overwrite(port, address, size, (mach_vm_address_t)buffer, &nread);
 
     if (kr || nread != size)
     {
-        fprintf(stderr, "[ERROR] vm_read failed!\n");
+        fprintf(stderr, "[ERROR] vm_read failed! %d\n", kr);
         exit(1);
     }
 }
@@ -122,6 +131,8 @@ static mach_vm_address_t get_image_size(mach_vm_address_t address, pid_t pid)
 #endif
     vm_region_basic_info_data_64_t region_info;
     // allocate a buffer to read the header info
+    // NOTE: this is not exactly correct since the 64bit version has an extra 4 bytes
+    // but this will work for this purpose so no need for more complexity!
     struct mach_header header;
     readmem((mach_vm_offset_t*)&header, address, sizeof(struct mach_header), pid, &region_info);
 
@@ -133,9 +144,16 @@ static mach_vm_address_t get_image_size(mach_vm_address_t address, pid_t pid)
     
     mach_vm_address_t imagefilesize = 0;
     
-    // read the header info to find the LINKEDIT
+    // read the load commands
     uint8_t *loadcmds = malloc(header.sizeofcmds*sizeof(uint8_t));
-    readmem((mach_vm_offset_t*)loadcmds, address+sizeof(struct mach_header), header.sizeofcmds, pid, &region_info);
+    uint16_t mach_header_size = 0;
+    if (header.magic == MH_MAGIC)
+        mach_header_size = sizeof(struct mach_header);
+    else if (header.magic == MH_MAGIC_64)
+        mach_header_size = sizeof(struct mach_header_64);
+
+    readmem((mach_vm_offset_t*)loadcmds, address+mach_header_size, header.sizeofcmds, pid, &region_info);
+    
     // process and retrieve address and size of linkedit
     uint8_t *loadCmdAddress = 0;
     // first load cmd address
@@ -154,6 +172,13 @@ static mach_vm_address_t get_image_size(mach_vm_address_t address, pid_t pid)
             segCmd = (struct segment_command*)loadCmdAddress;
             if (strcmp((char*)(segCmd->segname), "__PAGEZERO") != 0)
             {
+                if (strcmp((char*)(segCmd->segname), "__TEXT") == 0)
+                {
+                    vmaddr_slide = address - segCmd->vmaddr;
+                }
+//#if DEBUG
+//                printf("[DEBUG] %s %x\n", segCmd->segname, segCmd->filesize);
+//#endif
                 imagefilesize += segCmd->filesize;
             }
         }
@@ -162,6 +187,11 @@ static mach_vm_address_t get_image_size(mach_vm_address_t address, pid_t pid)
             segCmd64 = (struct segment_command_64*)loadCmdAddress;
             if (strcmp((char*)(segCmd64->segname), "__PAGEZERO") != 0)
             {
+                if (strcmp((char*)(segCmd64->segname), "__TEXT") == 0)
+                {
+                    vmaddr_slide = address - segCmd64->vmaddr;
+                }
+
                 imagefilesize += segCmd64->filesize;
             }
         }
@@ -184,6 +214,8 @@ static void dump_binary(mach_vm_address_t address, pid_t pid, void *buffer)
 #endif
     vm_region_basic_info_data_64_t region_info;
     // allocate a buffer to read the header info
+    // NOTE: this is not exactly correct since the 64bit version has an extra 4 bytes
+    // but this will work for this purpose so no need for more complexity!
     struct mach_header header;
     readmem((mach_vm_offset_t*)&header, address, sizeof(struct mach_header), pid, &region_info);
     
@@ -193,11 +225,17 @@ static void dump_binary(mach_vm_address_t address, pid_t pid, void *buffer)
         exit(1);
     }
     
-    mach_vm_address_t imagefilesize = 0;
-    
     // read the header info to find the LINKEDIT
     uint8_t *loadcmds = malloc(header.sizeofcmds*sizeof(uint8_t));
-    readmem((mach_vm_offset_t*)loadcmds, address+sizeof(struct mach_header), header.sizeofcmds, pid, &region_info);
+    
+    uint16_t mach_header_size = 0;
+    if (header.magic == MH_MAGIC)
+        mach_header_size = sizeof(struct mach_header);
+    else if (header.magic == MH_MAGIC_64)
+        mach_header_size = sizeof(struct mach_header_64);
+    // retrieve the load commands
+    readmem((mach_vm_offset_t*)loadcmds, address+mach_header_size, header.sizeofcmds, pid, &region_info);
+    
     // process and retrieve address and size of linkedit
     uint8_t *loadCmdAddress = 0;
     // first load cmd address
@@ -217,7 +255,10 @@ static void dump_binary(mach_vm_address_t address, pid_t pid, void *buffer)
             segCmd = (struct segment_command*)loadCmdAddress;
             if (strcmp((char*)(segCmd->segname), "__PAGEZERO") != 0)
             {
-                readmem(buffer, segCmd->vmaddr, segCmd->filesize, pid, &region_info);
+#if DEBUG
+                printf("[DEBUG] Dumping %s at %llx with size %x (buffer:%x)\n", segCmd->segname, segCmd->vmaddr+vmaddr_slide, segCmd->filesize, (uint32_t)buffer);
+#endif
+                readmem((mach_vm_offset_t*)buffer, segCmd->vmaddr+vmaddr_slide, segCmd->filesize, pid, &region_info);
             }
             buffer += segCmd->filesize;
         }
@@ -226,9 +267,12 @@ static void dump_binary(mach_vm_address_t address, pid_t pid, void *buffer)
             segCmd64 = (struct segment_command_64*)loadCmdAddress;
             if (strcmp((char*)(segCmd64->segname), "__PAGEZERO") != 0)
             {
-                imagefilesize += segCmd64->filesize;
+#if DEBUG
+                printf("[DEBUG] Dumping %s at %llx with size %llx (buffer:%x)\n", segCmd64->segname, segCmd64->vmaddr+vmaddr_slide, segCmd64->filesize, (uint32_t)buffer);
+#endif
+                readmem((mach_vm_offset_t*)buffer, segCmd64->vmaddr+vmaddr_slide, segCmd64->filesize, pid, &region_info);
             }
-            buffer += segCmd->filesize;
+            buffer += segCmd64->filesize;
         }
         // advance to next command
         loadCmdAddress += loadCommand->cmdsize;
@@ -286,11 +330,8 @@ main(int argc, char ** argv)
     uint32_t size     = 0;
     pid_t    pid      = 0;
     uint8_t  fulldump = 0;
-#if defined (__arm__)
-	uint32_t address = 0;
-#else
-    uint64_t address = 0;
-#endif
+
+	mach_vm_address_t address = 0;
 
 	// process command line options
 	while ((c = getopt_long (argc, argv, "a:s:o:p:f", long_options, &option_index)) != -1)
