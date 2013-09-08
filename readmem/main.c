@@ -4,10 +4,10 @@
  * A small userland util to dump processes memory
  * Useful to dump stuff or verify stuff without gdb or running under gdb
  *
- * (c) fG! - 2012 - reverser@put.as - http://reverse.put.as
+ * (c) fG! - 2012, 2013 - reverser@put.as - http://reverse.put.as
  *
  * To compile:
- * gcc -Wall -o readkmem readkmem.c
+ * gcc -Wall -o readmem readmem.c
  *
  * v0.1 - Initial version
  * v0.2 - Fix the columns output and display memory protection flags
@@ -17,6 +17,8 @@
  *        Since we have the base address to dump from, we just compute the slide
  *        against the info at the header. Easier than using dyld functions for this.
  *        iOS still has problems dumping libs because of the giant/common __LINKEDIT section!
+ * v0.5 - Add function and option to locate and dump main binary
+ *        No need to point its address using this option
  *
  * Check http://246tnt.com/iPhone/ for iOS Entitlements reference
  *
@@ -41,19 +43,20 @@
 #include <mach/vm_map.h>
 #include <mach-o/loader.h>
 
-#define VERSION "0.4"
+#define VERSION "0.5"
 
 #define MAX_SIZE 100000000
 
-// prototypes
+/* local functions */
 static void header(void);
 static void usage(void);
 static void get_protection(vm_prot_t protection, char *prot);
 static void readmem(mach_vm_offset_t *buffer, mach_vm_address_t address, mach_vm_size_t size, pid_t pid, vm_region_basic_info_data_64_t *info);
 static mach_vm_address_t get_image_size(mach_vm_address_t address, pid_t pid);
 static void dump_binary(mach_vm_address_t address, pid_t pid, void *buffer);
+static kern_return_t find_main_binary(pid_t pid, mach_vm_address_t *main_address);
 
-// for iOS
+/* for iOS */
 #if defined (__arm__)
 extern kern_return_t mach_vm_region
 (
@@ -76,15 +79,15 @@ extern kern_return_t mach_vm_read_overwrite
  );
 #endif
 
+/* globals */
 mach_vm_address_t vmaddr_slide = 0;
 
 static void 
 readmem(mach_vm_offset_t *buffer, mach_vm_address_t address, mach_vm_size_t size, pid_t pid, vm_region_basic_info_data_64_t *info)
 {
     // get task for pid
-    vm_map_t port;
-
-    kern_return_t kr;
+    vm_map_t port = 0;
+    kern_return_t kr = 0;
 //#if DEBUG
 //    printf("[DEBUG] Readmem of address %llx to buffer %llx with size %llx\n", address, buffer, size);
 //#endif
@@ -106,14 +109,16 @@ readmem(mach_vm_offset_t *buffer, mach_vm_address_t address, mach_vm_size_t size
     }
 
     // read memory - vm_read_overwrite because we supply the buffer
-    mach_vm_size_t nread;
-
+    mach_vm_size_t nread = 0;
     kr = mach_vm_read_overwrite(port, address, size, (mach_vm_address_t)buffer, &nread);
 
-    if (kr || nread != size)
+    if (kr)
     {
         fprintf(stderr, "[ERROR] vm_read failed! %d\n", kr);
-        exit(1);
+    }
+    else if (nread != size)
+    {
+        fprintf(stderr, "[ERRRO] vm_read failed! requested size: 0x%llx read: 0x%llx\n", size, nread);
     }
 }
 
@@ -124,16 +129,17 @@ readmem(mach_vm_offset_t *buffer, mach_vm_address_t address, mach_vm_size_t size
  * if we dump using vmaddresses, we will get the alignment space into the dumped
  * binary and get into problems :-)
  */
-static mach_vm_address_t get_image_size(mach_vm_address_t address, pid_t pid)
+static uint64_t
+get_image_size(mach_vm_address_t address, pid_t pid)
 {
 #if DEBUG
     printf("[DEBUG] Executing %s\n", __FUNCTION__);
 #endif
-    vm_region_basic_info_data_64_t region_info;
+    vm_region_basic_info_data_64_t region_info = {0};
     // allocate a buffer to read the header info
     // NOTE: this is not exactly correct since the 64bit version has an extra 4 bytes
     // but this will work for this purpose so no need for more complexity!
-    struct mach_header header;
+    struct mach_header header = {0};
     readmem((mach_vm_offset_t*)&header, address, sizeof(struct mach_header), pid, &region_info);
 
     if (header.magic != MH_MAGIC && header.magic != MH_MAGIC_64)
@@ -142,16 +148,14 @@ static mach_vm_address_t get_image_size(mach_vm_address_t address, pid_t pid)
         exit(1);
     }
     
-    mach_vm_address_t imagefilesize = 0;
-    
+    uint64_t imagefilesize = 0;
     // read the load commands
-    uint8_t *loadcmds = malloc(header.sizeofcmds*sizeof(uint8_t));
-    uint16_t mach_header_size = 0;
-    if (header.magic == MH_MAGIC)
-        mach_header_size = sizeof(struct mach_header);
-    else if (header.magic == MH_MAGIC_64)
+    uint8_t *loadcmds = malloc(header.sizeofcmds);
+    uint16_t mach_header_size = sizeof(struct mach_header);
+    if (header.magic == MH_MAGIC_64)
+    {
         mach_header_size = sizeof(struct mach_header_64);
-
+    }
     readmem((mach_vm_offset_t*)loadcmds, address+mach_header_size, header.sizeofcmds, pid, &region_info);
     
     // process and retrieve address and size of linkedit
@@ -170,9 +174,9 @@ static mach_vm_address_t get_image_size(mach_vm_address_t address, pid_t pid)
         if (loadCommand->cmd == LC_SEGMENT)
         {
             segCmd = (struct segment_command*)loadCmdAddress;
-            if (strcmp((char*)(segCmd->segname), "__PAGEZERO") != 0)
+            if (strncmp((char*)(segCmd->segname), "__PAGEZERO", 16) != 0)
             {
-                if (strcmp((char*)(segCmd->segname), "__TEXT") == 0)
+                if (strncmp((char*)(segCmd->segname), "__TEXT", 16) == 0)
                 {
                     vmaddr_slide = address - segCmd->vmaddr;
                 }
@@ -185,13 +189,12 @@ static mach_vm_address_t get_image_size(mach_vm_address_t address, pid_t pid)
         else if (loadCommand->cmd == LC_SEGMENT_64)
         {
             segCmd64 = (struct segment_command_64*)loadCmdAddress;
-            if (strcmp((char*)(segCmd64->segname), "__PAGEZERO") != 0)
+            if (strncmp((char*)(segCmd64->segname), "__PAGEZERO", 16) != 0)
             {
-                if (strcmp((char*)(segCmd64->segname), "__TEXT") == 0)
+                if (strncmp((char*)(segCmd64->segname), "__TEXT", 16) == 0)
                 {
                     vmaddr_slide = address - segCmd64->vmaddr;
                 }
-
                 imagefilesize += segCmd64->filesize;
             }
         }
@@ -202,21 +205,70 @@ static mach_vm_address_t get_image_size(mach_vm_address_t address, pid_t pid)
     return imagefilesize;
 }
 
+/*
+ * find main binary by iterating memory region
+ * assumes there's only one binary with filetype == MH_EXECUTE
+ */
+static kern_return_t
+find_main_binary(pid_t pid, mach_vm_address_t *main_address)
+{
+  // get task for pid
+  vm_map_t target_task = 0;
+  kern_return_t kr;
+  if (task_for_pid(mach_task_self(), pid, &target_task))
+  {
+    fprintf(stderr, "[ERROR] Can't execute task_for_pid! Do you have the right permissions/entitlements?\n");
+    return KERN_FAILURE;
+  }
+  
+  vm_address_t iter = 0;
+  while (1)
+  {
+      struct mach_header mh = {0};
+      vm_address_t addr = iter;
+      vm_size_t lsize = 0;
+      uint32_t depth;
+      mach_vm_size_t bytes_read = 0;
+      struct vm_region_submap_info_64 info;
+      mach_msg_type_number_t count = VM_REGION_SUBMAP_INFO_COUNT_64;
+      kr = vm_region_recurse_64(target_task, &addr, &lsize, &depth, (vm_region_info_t)&info, &count);
+      if (kr)
+      {
+          break;
+      }
+      kr = mach_vm_read_overwrite(target_task, (mach_vm_address_t)addr, (mach_vm_size_t)sizeof(struct mach_header), (mach_vm_address_t)&mh, &bytes_read);
+      if (kr == KERN_SUCCESS && bytes_read == sizeof(struct mach_header))
+      {
+          /* only one image with MH_EXECUTE filetype */
+          if ( (mh.magic == MH_MAGIC || mh.magic == MH_MAGIC_64) && mh.filetype == MH_EXECUTE)
+          {
+#if DEBUG
+              printf("[DEBUG] Found main binary mach-o image @ %p!\n", (void*)addr);
+#endif
+              *main_address = addr;
+              break;
+          }
+      }
+      iter = addr + lsize;
+  }
+  return KERN_SUCCESS;
+}
 
 /*
  * dump the binary into the allocated buffer
  * we dump each segment and advance the buffer
  */
-static void dump_binary(mach_vm_address_t address, pid_t pid, void *buffer)
+static void
+dump_binary(mach_vm_address_t address, pid_t pid, void *buffer)
 {
 #if DEBUG
     printf("[DEBUG] Executing %s\n", __FUNCTION__);
 #endif
-    vm_region_basic_info_data_64_t region_info;
+    vm_region_basic_info_data_64_t region_info = {0};
     // allocate a buffer to read the header info
     // NOTE: this is not exactly correct since the 64bit version has an extra 4 bytes
     // but this will work for this purpose so no need for more complexity!
-    struct mach_header header;
+    struct mach_header header = {0};
     readmem((mach_vm_offset_t*)&header, address, sizeof(struct mach_header), pid, &region_info);
     
     if (header.magic != MH_MAGIC && header.magic != MH_MAGIC_64)
@@ -226,13 +278,13 @@ static void dump_binary(mach_vm_address_t address, pid_t pid, void *buffer)
     }
     
     // read the header info to find the LINKEDIT
-    uint8_t *loadcmds = malloc(header.sizeofcmds*sizeof(uint8_t));
+    uint8_t *loadcmds = malloc(header.sizeofcmds);
     
-    uint16_t mach_header_size = 0;
-    if (header.magic == MH_MAGIC)
-        mach_header_size = sizeof(struct mach_header);
-    else if (header.magic == MH_MAGIC_64)
+    uint16_t mach_header_size = sizeof(struct mach_header);
+    if (header.magic == MH_MAGIC_64)
+    {
         mach_header_size = sizeof(struct mach_header_64);
+    }
     // retrieve the load commands
     readmem((mach_vm_offset_t*)loadcmds, address+mach_header_size, header.sizeofcmds, pid, &region_info);
     
@@ -253,7 +305,7 @@ static void dump_binary(mach_vm_address_t address, pid_t pid, void *buffer)
         if (loadCommand->cmd == LC_SEGMENT)
         {
             segCmd = (struct segment_command*)loadCmdAddress;
-            if (strcmp((char*)(segCmd->segname), "__PAGEZERO") != 0)
+            if (strncmp((char*)(segCmd->segname), "__PAGEZERO", 16) != 0)
             {
 #if DEBUG
                 printf("[DEBUG] Dumping %s at %llx with size %x (buffer:%x)\n", segCmd->segname, segCmd->vmaddr+vmaddr_slide, segCmd->filesize, (uint32_t)buffer);
@@ -265,7 +317,7 @@ static void dump_binary(mach_vm_address_t address, pid_t pid, void *buffer)
         else if (loadCommand->cmd == LC_SEGMENT_64)
         {
             segCmd64 = (struct segment_command_64*)loadCmdAddress;
-            if (strcmp((char*)(segCmd64->segname), "__PAGEZERO") != 0)
+            if (strncmp((char*)(segCmd64->segname), "__PAGEZERO", 16) != 0)
             {
 #if DEBUG
                 printf("[DEBUG] Dumping %s at %llx with size %llx (buffer:%x)\n", segCmd64->segname, segCmd64->vmaddr+vmaddr_slide, segCmd64->filesize, (uint32_t)buffer);
@@ -295,10 +347,25 @@ get_protection(vm_prot_t protection, char *prot)
 static void
 usage(void)
 {
-	fprintf(stderr,"readmem -p pid -a address -s size [-o filename] [-f]\n");
+	fprintf(stderr,"readmem -p pid [-a address] [-s size] [-o filename] [-f] [-m]\n");
 	fprintf(stderr,"Available Options : \n");
-	fprintf(stderr,"       -o filename	file to write binary output to\n");
-    fprintf(stderr,"       -f           make a full dump of target binary\n");
+    fprintf(stderr,"        -a start address\n");
+    fprintf(stderr,"        -s dump size\n");
+    fprintf(stderr,"        -o filename	file to write binary output to\n");
+    fprintf(stderr,"        -f (try do dump whole mach-o binary if start address is valid)\n");
+    fprintf(stderr,"        -m (locate and dump main binary)\n");
+	fprintf(stderr,"Usage:\n");
+    fprintf(stderr,"- Read 16 bytes starting at address 0x1000 from PID XX\n");
+    fprintf(stderr,"readmem -p XX -a 0x1000 -s 16\n");
+    fprintf(stderr,"- Dump Mach-O binary from PID XX located at address 0x1000\n");
+    fprintf(stderr,"readmem -p XX -a 0x1000 -o memdump -f\n");
+    fprintf(stderr,"- Dump main Mach-O binary of PID XX\n");
+    fprintf(stderr,"readmem -p -o memdump -m\n");
+    fprintf(stderr,"Note:\n");
+    fprintf(stderr,"The -f option can be used to dump main binary, libraries, bundles, etc\n");
+    fprintf(stderr,"The -m option will only dump the main binary.\n");
+    fprintf(stderr,"\n");
+        
 	exit(1);
 }
 
@@ -313,7 +380,6 @@ header(void)
 int 
 main(int argc, char ** argv)
 {
-    
 	// required structure for long options
 	static struct option long_options[]={
         { "pid", required_argument, NULL, 'p' },
@@ -321,20 +387,21 @@ main(int argc, char ** argv)
 		{ "size", required_argument, NULL, 's' },
 		{ "out", required_argument, NULL, 'o' },
         { "full", no_argument, NULL, 'f' },
+        { "main", no_argument, NULL, 'm' },
 		{ NULL, 0, NULL, 0 }
 	};
 	int option_index = 0;
     int c = 0;
 	char *outputname = NULL;
 	
-    uint32_t size     = 0;
+    uint32_t size     = 16; /* make 16bytes the default size */
     pid_t    pid      = 0;
     uint8_t  fulldump = 0;
-
+    uint8_t  maindump = 0;
 	mach_vm_address_t address = 0;
 
 	// process command line options
-	while ((c = getopt_long (argc, argv, "a:s:o:p:f", long_options, &option_index)) != -1)
+	while ((c = getopt_long (argc, argv, "a:s:o:p:fm", long_options, &option_index)) != -1)
 	{
 		switch (c)
 		{
@@ -361,6 +428,9 @@ main(int argc, char ** argv)
             case 'f':
                 fulldump = 1;
                 break;
+            case 'm':
+                maindump = 1;
+                break;
 			default:
 				usage();
 				exit(1);
@@ -369,10 +439,34 @@ main(int argc, char ** argv)
 	
 	header();
     
-	if (argc < 7)
-	{
-		usage();
-	}
+    if (pid == 0)
+    {
+        fprintf(stderr, "[ERROR] Please add PID argument!\n\n");
+        usage();
+    }
+    
+    if (fulldump && !address)
+    {
+        fprintf(stderr, "[ERROR] -f option requires a start address!\n\n");
+        usage();
+    }
+    if (fulldump && !outputname)
+    {
+        fprintf(stderr, "[ERROR] -f option requires an output filename!\n\n");
+        usage();
+    }
+    
+    if (outputname && !address && !maindump)
+    {
+        fprintf(stderr, "[ERROR] -o option requires a start address!\n\n");
+        usage();
+    }
+    
+    if (maindump && !outputname)
+    {
+        fprintf(stderr, "[ERROR] -m option requires an output filename!\n\n");
+        usage();
+    }
     
     if (size > MAX_SIZE || (size == 0 && fulldump == 0))
     {
@@ -383,7 +477,7 @@ main(int argc, char ** argv)
     uint8_t *readbuffer = NULL;
     if (fulldump == 0)
     {
-        readbuffer = malloc(size*sizeof(uint8_t));
+        readbuffer = malloc(size);
         if (readbuffer == NULL)
         {
             printf("[ERROR] Memory allocation failed!\n");
@@ -407,16 +501,28 @@ main(int argc, char ** argv)
         exit(1);
     }
     
-    vm_region_basic_info_data_64_t region_info;
+    vm_region_basic_info_data_64_t region_info = {0};
 	// read memory
     // if it's a full image dump, we need to read its header and find the LINKEDIT segment
-    if (fulldump)
+    if (fulldump || maindump)
     {
+        if (maindump)
+        {
+            if (find_main_binary(pid, &address))
+            {
+                fprintf(stderr, "[ERROR] Can't find main binary address!\n");
+                exit(1);
+            }
+        }
         // first we need to find the file size because memory alignment slack spaces
-        mach_vm_address_t imagesize = 0;
-        imagesize = get_image_size(address, pid);
-        // reallocate the buffer since size argument is not used
-        readbuffer = malloc((long)imagesize * sizeof(uint8_t));
+        uint64_t imagesize = 0;
+        if ( (imagesize = get_image_size(address, pid)) == 0 )
+        {
+            fprintf(stderr, "[ERROR] Got image file size equal to 0!");
+            exit(1);
+        }
+        // allocate the buffer since size argument is not used
+        readbuffer = malloc(imagesize);
         // and finally read the sections and dump their contents to the buffer
         dump_binary(address, pid, (void*)readbuffer);
         // dump buffer contents to file
