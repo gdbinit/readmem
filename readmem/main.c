@@ -1,5 +1,8 @@
 /*
- * Readmem
+ *  _____           _ _____
+ * | __  |___ ___ _| |     |___ _____
+ * |    -| -_| .'| . | | | | -_|     |
+ * |__|__|___|__,|___|_|_|_|___|_|_|_|
  *
  * A small userland util to dump processes memory
  * Useful to dump stuff or verify stuff without gdb or running under gdb
