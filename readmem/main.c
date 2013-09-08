@@ -147,7 +147,7 @@ get_image_size(mach_vm_address_t address, pid_t pid)
 
     if (header.magic != MH_MAGIC && header.magic != MH_MAGIC_64)
     {
-		printf("[ERROR] Target is not a mach-o binary!\n");
+        printf("[ERROR] Target is not a mach-o binary!\n");
         exit(1);
     }
     
@@ -177,24 +177,21 @@ get_image_size(mach_vm_address_t address, pid_t pid)
         if (loadCommand->cmd == LC_SEGMENT)
         {
             segCmd = (struct segment_command*)loadCmdAddress;
-            if (strncmp((char*)(segCmd->segname), "__PAGEZERO", 16) != 0)
+            if (strncmp(segCmd->segname, "__PAGEZERO", 16) != 0)
             {
-                if (strncmp((char*)(segCmd->segname), "__TEXT", 16) == 0)
+                if (strncmp(segCmd->segname, "__TEXT", 16) == 0)
                 {
                     vmaddr_slide = address - segCmd->vmaddr;
                 }
-//#if DEBUG
-//                printf("[DEBUG] %s %x\n", segCmd->segname, segCmd->filesize);
-//#endif
                 imagefilesize += segCmd->filesize;
             }
         }
         else if (loadCommand->cmd == LC_SEGMENT_64)
         {
             segCmd64 = (struct segment_command_64*)loadCmdAddress;
-            if (strncmp((char*)(segCmd64->segname), "__PAGEZERO", 16) != 0)
+            if (strncmp(segCmd64->segname, "__PAGEZERO", 16) != 0)
             {
-                if (strncmp((char*)(segCmd64->segname), "__TEXT", 16) == 0)
+                if (strncmp(segCmd64->segname, "__TEXT", 16) == 0)
                 {
                     vmaddr_slide = address - segCmd64->vmaddr;
                 }
@@ -234,8 +231,7 @@ find_main_binary(pid_t pid, mach_vm_address_t *main_address)
       mach_vm_size_t bytes_read = 0;
       struct vm_region_submap_info_64 info;
       mach_msg_type_number_t count = VM_REGION_SUBMAP_INFO_COUNT_64;
-      kr = vm_region_recurse_64(target_task, &addr, &lsize, &depth, (vm_region_info_t)&info, &count);
-      if (kr)
+      if (vm_region_recurse_64(target_task, &addr, &lsize, &depth, (vm_region_info_t)&info, &count))
       {
           break;
       }
@@ -308,7 +304,7 @@ dump_binary(mach_vm_address_t address, pid_t pid, void *buffer)
         if (loadCommand->cmd == LC_SEGMENT)
         {
             segCmd = (struct segment_command*)loadCmdAddress;
-            if (strncmp((char*)(segCmd->segname), "__PAGEZERO", 16) != 0)
+            if (strncmp(segCmd->segname, "__PAGEZERO", 16) != 0)
             {
 #if DEBUG
                 printf("[DEBUG] Dumping %s at %llx with size %x (buffer:%x)\n", segCmd->segname, segCmd->vmaddr+vmaddr_slide, segCmd->filesize, (uint32_t)buffer);
@@ -320,7 +316,7 @@ dump_binary(mach_vm_address_t address, pid_t pid, void *buffer)
         else if (loadCommand->cmd == LC_SEGMENT_64)
         {
             segCmd64 = (struct segment_command_64*)loadCmdAddress;
-            if (strncmp((char*)(segCmd64->segname), "__PAGEZERO", 16) != 0)
+            if (strncmp(segCmd64->segname, "__PAGEZERO", 16) != 0)
             {
 #if DEBUG
                 printf("[DEBUG] Dumping %s at %llx with size %llx (buffer:%x)\n", segCmd64->segname, segCmd64->vmaddr+vmaddr_slide, segCmd64->filesize, (uint32_t)buffer);
