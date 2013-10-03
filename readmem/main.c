@@ -627,7 +627,7 @@ read_memory(struct options *opts)
             int x = 0;
             int z = 0;
             int linelength = 0;
-            
+            mach_vm_address_t tmpaddr = opts->address;
             // retrieve memory protection for the region of the starting address
             // CAVEAT: it will be incorrect if dumping size includes more than one region
             //         but we can't get protection per page
@@ -640,7 +640,7 @@ read_memory(struct options *opts)
             while (i < opts->size)
             {
                 linelength = (opts->size - i) <= 16 ? (opts->size - i) : 16;
-                fprintf(stdout, "%p ",(void*)opts->address);
+                fprintf(stdout, "%p ",(void*)tmpaddr);
                 z = i;
                 // hex dump
                 for (x = 0; x < linelength; x++)
@@ -662,7 +662,7 @@ read_memory(struct options *opts)
                 }
                 i += 16;
                 fprintf(stdout, "|\n");
-                opts->address += 16;
+                tmpaddr += 16;
             }
             fprintf(stdout, "\n");
         }
