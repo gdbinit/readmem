@@ -7,10 +7,20 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		7BDB506917FCF44200A9CDCB /* main.c in Sources */ = {isa = PBXBuildFile; fileRef = DEC87F85150652C900A90594 /* main.c */; };
 		DEC87F86150652C900A90594 /* main.c in Sources */ = {isa = PBXBuildFile; fileRef = DEC87F85150652C900A90594 /* main.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		7BDB506B17FCF44200A9CDCB /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = /usr/share/man/man1/;
+			dstSubfolderSpec = 0;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
 		DEC87F7F150652C900A90594 /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -23,6 +33,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		7BDB506F17FCF44200A9CDCB /* readmemios */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = readmemios; sourceTree = BUILT_PRODUCTS_DIR; };
 		DE9901E2150657BD00AB3495 /* Entitlements.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Entitlements.plist; sourceTree = "<group>"; };
 		DE9901E71506E24600AB3495 /* README */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = README; sourceTree = "<group>"; };
 		DEC87F81150652C900A90594 /* readmem */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = readmem; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -30,6 +41,13 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		7BDB506A17FCF44200A9CDCB /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		DEC87F7E150652C900A90594 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -54,6 +72,7 @@
 			isa = PBXGroup;
 			children = (
 				DEC87F81150652C900A90594 /* readmem */,
+				7BDB506F17FCF44200A9CDCB /* readmemios */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -69,6 +88,23 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		7BDB506717FCF44200A9CDCB /* readmemios */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7BDB506C17FCF44200A9CDCB /* Build configuration list for PBXNativeTarget "readmemios" */;
+			buildPhases = (
+				7BDB506817FCF44200A9CDCB /* Sources */,
+				7BDB506A17FCF44200A9CDCB /* Frameworks */,
+				7BDB506B17FCF44200A9CDCB /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = readmemios;
+			productName = readmem;
+			productReference = 7BDB506F17FCF44200A9CDCB /* readmemios */;
+			productType = "com.apple.product-type.tool";
+		};
 		DEC87F80150652C900A90594 /* readmem */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = DEC87F8B150652C900A90594 /* Build configuration list for PBXNativeTarget "readmem" */;
@@ -107,11 +143,20 @@
 			projectRoot = "";
 			targets = (
 				DEC87F80150652C900A90594 /* readmem */,
+				7BDB506717FCF44200A9CDCB /* readmemios */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXSourcesBuildPhase section */
+		7BDB506817FCF44200A9CDCB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7BDB506917FCF44200A9CDCB /* main.c in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		DEC87F7D150652C900A90594 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -123,6 +168,33 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
+		7BDB506D17FCF44200A9CDCB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD_32_64_BIT)";
+				CODE_SIGN_ENTITLEMENTS = Entitlements.plist;
+				CODE_SIGN_IDENTITY = "";
+				GCC_VERSION = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 6.0;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = readmemios;
+				SDKROOT = iphoneos7.0;
+			};
+			name = Debug;
+		};
+		7BDB506E17FCF44200A9CDCB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD_32_64_BIT)";
+				CODE_SIGN_ENTITLEMENTS = Entitlements.plist;
+				CODE_SIGN_IDENTITY = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 6.0;
+				ONLY_ACTIVE_ARCH = NO;
+				PRODUCT_NAME = readmemios;
+				SDKROOT = iphoneos7.0;
+			};
+			name = Release;
+		};
 		DEC87F89150652C900A90594 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -175,6 +247,7 @@
 				CODE_SIGN_ENTITLEMENTS = Entitlements.plist;
 				CODE_SIGN_IDENTITY = "";
 				GCC_VERSION = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 6.0;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
@@ -187,6 +260,7 @@
 				ARCHS = "$(ARCHS_STANDARD_32_64_BIT)";
 				CODE_SIGN_ENTITLEMENTS = Entitlements.plist;
 				CODE_SIGN_IDENTITY = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 6.0;
 				ONLY_ACTIVE_ARCH = NO;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
@@ -196,6 +270,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		7BDB506C17FCF44200A9CDCB /* Build configuration list for PBXNativeTarget "readmemios" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7BDB506D17FCF44200A9CDCB /* Debug */,
+				7BDB506E17FCF44200A9CDCB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		DEC87F7B150652C900A90594 /* Build configuration list for PBXProject "readmem" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
